@@ -1,0 +1,277 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+
+local Window = Rayfield:CreateWindow({
+   Name = "Nightmare Client",
+   Icon = 0, -- Icon in Topbar. Can use Lucide Icons (string) or Roblox Image (number). 0 to use no icon (default).
+   LoadingTitle = "Loading Nightmare Client",
+   LoadingSubtitle = "by kks",
+   ShowText = "Nightmare client", -- for mobile users to unhide rayfield, change if you'd like
+   Theme = "Amethyst", -- Check https://docs.sirius.menu/rayfield/configuration/themes
+
+   ToggleUIKeybind = "M", -- The keybind to toggle the UI visibility (string like "M" or Enum.KeyCode)
+
+   DisableRayfieldPrompts = false,
+   DisableBuildWarnings = false, -- Prevents Rayfield from warning when the script has a version mismatch with the interface
+
+   ConfigurationSaving = {
+      Enabled = true,
+      FolderName = nil, -- Create a custom folder for your hub/game
+      FileName = "Big Hub"
+   },
+
+   Discord = {
+      Enabled = true, -- Prompt the user to join your Discord server if their executor supports it
+      Invite = "https://discord.gg/YZb9x5Ev", -- The Discord invite code, do not include discord.gg/. E.g. discord.gg/ ABCD would be ABCD
+      RememberJoins = true -- Set this to false to make them join the discord every time they load it up
+   },
+
+   KeySystem = true, -- Set this to true to use our key system
+   KeySettings = {
+      Title = "key system",
+      Subtitle = "Key System",
+      Note = "join the discord", -- Use this to tell the user how to get a key
+      FileName = "Key", -- It is recommended to use something unique as other scripts using Rayfield may overwrite your key file
+      SaveKey = false, -- The user's key will be saved, but if you change the key, they will be unable to use your script
+      GrabKeyFromSite = false, -- If this is true, set Key below to the RAW site you would like Rayfield to get the key from
+      Key = {"kks12345"} -- List of keys that will be accepted by the system, can be RAW file links (pastebin, github etc) or simple strings ("hello","key22")
+   }
+})
+
+local Tab = Window:CreateTab("Settings")
+local Section = Tab:CreateSection("Settings")
+
+
+local Tab = Window:CreateTab("Main")
+local Section = Tab:CreateSection("Scripts")
+ 
+-- Lock-on: look at closest non-teammate player to screen center while holding F
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local lockOn = false
+local lockTarget = nil
+-- FOV settings (pixels)
+local fovRadius = 100 -- smaller side radius; change to taste
+
+-- Auto-lock and ESP/Chams settings
+local autoLockEnabled = false -- only lock while player holds F (disable automatic locking)
+local chamsEnabled = true
+local espEnabled = true
+local espObjects = {} -- map player -> {highlight = <Highlight>, billboard = <BillboardGui>}
+
+-- Drawing FOV circle (uses exploit Drawing API). If unavailable, circle will be nil.
+local fovCircle = nil
+if type(Drawing) == "table" and Drawing.new then
+   local ok, circle = pcall(function()
+      local c = Drawing.new("Circle")
+      c.Color = Color3.fromRGB(255, 100, 100)
+      c.Thickness = 2
+      c.NumSides = 64
+      c.Visible = true
+      c.ZIndex = 5
+      c.Filled = false
+      return c
+   end)
+   if ok then fovCircle = circle end
+end
+
+local function isTeammate(p)
+   if not LocalPlayer or not LocalPlayer.Team or not p.Team then return false end
+   return LocalPlayer.Team == p.Team
+end
+
+local function getTarget()
+   local closest, closestDist = nil, math.huge
+   local viewportSize = Camera.ViewportSize
+   local centerX, centerY = viewportSize.X/2, viewportSize.Y/2
+   for _, player in pairs(Players:GetPlayers()) do
+      if player ~= LocalPlayer and player.Character and player.Character.Parent then
+         if not isTeammate(player) then
+            local hrp = player.Character:FindFirstChild("HumanoidRootPart") or player.Character:FindFirstChild("Head")
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            if hrp and humanoid and humanoid.Health > 0 then
+               local pos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+               if onScreen then
+                  local dx = pos.X - centerX
+                  local dy = pos.Y - centerY
+                  local dist = math.sqrt(dx*dx + dy*dy)
+                  -- Only consider players inside the FOV circle
+                  if dist <= fovRadius and dist < closestDist then
+                      closestDist = dist
+                      closest = player
+                  end
+               end
+            end
+         end
+      end
+   end
+   return closest
+end
+
+-- ESP / Chams helpers
+local function createESPForCharacter(player, character)
+   if not character or not player then return end
+   local head = character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
+   if not head then return end
+
+   espObjects[player] = espObjects[player] or {}
+
+   if chamsEnabled then
+      local ok, h = pcall(function()
+         local hl = Instance.new("Highlight")
+         hl.Adornee = character
+         hl.FillColor = Color3.fromRGB(255, 100, 100)
+         hl.FillTransparency = 0.6
+         hl.OutlineColor = Color3.fromRGB(0,0,0)
+         hl.OutlineTransparency = 0
+         hl.Parent = game:GetService("CoreGui")
+         return hl
+      end)
+      if ok and h then espObjects[player].highlight = h end
+   end
+
+   if espEnabled then
+      local ok, bill = pcall(function()
+         local b = Instance.new("BillboardGui")
+         b.Name = "NightmareESP"
+         b.Adornee = head
+         b.AlwaysOnTop = true
+         b.Size = UDim2.new(0, 140, 0, 22)
+         b.StudsOffset = Vector3.new(0, 1.5, 0)
+         local label = Instance.new("TextLabel")
+         label.Size = UDim2.new(1,0,1,0)
+         label.BackgroundTransparency = 1
+         label.TextColor3 = Color3.fromRGB(255,255,255)
+         label.TextStrokeTransparency = 0
+         label.Font = Enum.Font.SourceSansBold
+         label.TextScaled = true
+         label.Text = player.Name
+         label.Parent = b
+         b.Parent = LocalPlayer:WaitForChild("PlayerGui")
+         return b
+      end)
+      if ok and bill then espObjects[player].billboard = bill end
+   end
+end
+
+local function removeESPForPlayer(player)
+   local t = espObjects[player]
+   if not t then return end
+   if t.highlight and t.highlight.Parent then pcall(function() t.highlight:Destroy() end) end
+   if t.billboard and t.billboard.Parent then pcall(function() t.billboard:Destroy() end) end
+   espObjects[player] = nil
+end
+
+-- Attach ESP/Chams to existing players and future players
+for _, p in pairs(Players:GetPlayers()) do
+   if p ~= LocalPlayer then
+      p.CharacterAdded:Connect(function(char) createESPForCharacter(p, char) end)
+      if p.Character then createESPForCharacter(p, p.Character) end
+   end
+end
+
+Players.PlayerAdded:Connect(function(p)
+   if p ~= LocalPlayer then
+      p.CharacterAdded:Connect(function(char) createESPForCharacter(p, char) end)
+   end
+end)
+
+Players.PlayerRemoving:Connect(function(p) removeESPForPlayer(p) end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+   if gameProcessed then return end
+   if input.KeyCode == Enum.KeyCode.F then
+      local targ = getTarget()
+      if targ then
+          lockOn = true
+          lockTarget = targ
+      else
+          -- no valid target inside FOV at press time; do nothing
+          lockOn = false
+          lockTarget = nil
+      end
+   end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+   if gameProcessed then return end
+   if input.KeyCode == Enum.KeyCode.F then
+      lockOn = false
+      lockTarget = nil
+   end
+end)
+
+RunService.RenderStepped:Connect(function()
+   -- Update FOV circle visuals
+   if fovCircle then
+       local vs = Camera.ViewportSize
+       fovCircle.Position = Vector2.new(vs.X/2, vs.Y/2)
+       fovCircle.Radius = fovRadius
+       fovCircle.Visible = true
+   end
+
+      -- Auto-lock: acquire and maintain a single target inside the FOV circle
+      if autoLockEnabled then
+         local vs = Camera.ViewportSize
+         if (not lockTarget) or (not lockOn) then
+            local t = getTarget()
+            if t then
+               lockOn = true
+               lockTarget = t
+            end
+         else
+            -- verify current target still valid and inside FOV
+            if lockTarget and lockTarget.Character and lockTarget.Character.Parent then
+               local hrp = lockTarget.Character:FindFirstChild("HumanoidRootPart") or lockTarget.Character:FindFirstChild("Head")
+               local humanoid = lockTarget.Character:FindFirstChildOfClass("Humanoid")
+               if hrp and humanoid and humanoid.Health > 0 then
+                  local pos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+                  if onScreen then
+                     local dx = pos.X - vs.X/2
+                     local dy = pos.Y - vs.Y/2
+                     local dist = math.sqrt(dx*dx + dy*dy)
+                     if dist > fovRadius then
+                        lockTarget = nil
+                        lockOn = false
+                     end
+                  else
+                     lockTarget = nil
+                     lockOn = false
+                  end
+               else
+                  lockTarget = nil
+                  lockOn = false
+               end
+            else
+               lockTarget = nil
+               lockOn = false
+            end
+         end
+      end
+
+   if lockOn and lockTarget and lockTarget.Character and lockTarget.Character.Parent then
+      local hrp = lockTarget.Character:FindFirstChild("HumanoidRootPart") or lockTarget.Character:FindFirstChild("Head")
+      local humanoid = lockTarget.Character:FindFirstChildOfClass("Humanoid")
+      if hrp and humanoid and humanoid.Health > 0 then
+         local camPos = Camera.CFrame.Position
+         local targetPos = hrp.Position
+         Camera.CFrame = CFrame.new(camPos, targetPos)
+      else
+         -- target lost or dead: stop locking until user releases and re-presses F
+         lockTarget = nil
+         lockOn = false
+      end
+   end
+end)
+
+
+Section:CreateButton({
+   Name = "Load Lock-On Script",
+   Callback = function()
+       print("Lock-On Script Loaded. Hold F to lock on to nearest non-teammate player.")
+   end,
+})
